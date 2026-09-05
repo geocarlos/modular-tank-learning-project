@@ -3,7 +3,7 @@ from pxr import Gf, Usd, UsdGeom, Vt
 # ---------------------------------------------------------
 # PART 1: Generate the standalone Tread Link asset
 # ---------------------------------------------------------
-link_stage = Usd.Stage.CreateNew("usd/tread_link.usda")
+link_stage = Usd.Stage.CreateNew("out/tread_link.usda")
 UsdGeom.SetStageUpAxis(link_stage, UsdGeom.Tokens.y)
 UsdGeom.SetStageMetersPerUnit(link_stage, 1.0)
 
@@ -17,7 +17,7 @@ link_stage.GetRootLayer().Save()
 # ---------------------------------------------------------
 # PART 2: Build the Track Stage using PointInstancer
 # ---------------------------------------------------------
-track_stage = Usd.Stage.CreateNew("usd/track.usda")
+track_stage = Usd.Stage.CreateNew("out/track.usda")
 UsdGeom.SetStageUpAxis(track_stage, UsdGeom.Tokens.y)
 UsdGeom.SetStageMetersPerUnit(track_stage, 1.0)
 
@@ -44,4 +44,4 @@ instancer.GetPositionsAttr().Set(positions)
 instancer.GetProtoIndicesAttr().Set(proto_indices)
 
 track_stage.GetRootLayer().Save()
-print("Successfully generated usd/tread_link.usda and usd/track.usda")
+print("Successfully generated out/tread_link.usda and out/track.usda")

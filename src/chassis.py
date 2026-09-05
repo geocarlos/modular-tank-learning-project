@@ -1,7 +1,7 @@
 from pxr import Gf, Usd, UsdGeom
 
 # 1. Initialize Stage and Set Global Metadata
-stage = Usd.Stage.CreateNew("usd/chassis.usda")
+stage = Usd.Stage.CreateNew("out/chassis.usda")
 UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
 UsdGeom.SetStageMetersPerUnit(stage, 1.0)
 
