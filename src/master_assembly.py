@@ -14,13 +14,22 @@ chassis_prim = stage.DefinePrim("/Tank/Chassis")
 chassis_prim.GetReferences().AddReference("chassis.usda")
 
 # 4. Reference Left and Right Tracks
+# track.usda's tread run and road wheels are authored along local X, so a 90 degree
+# yaw is needed to align the tread direction with the chassis's forward (Z) axis.
+# The tracks must then be offset laterally along X (outboard of the hull, which is
+# 2.5m / half_width=1.25 wide) so they flank the hull rather than sitting on its centerline.
+track_lateral_offset = 1.5
 left_track = UsdGeom.Xform.Define(stage, "/Tank/Tracks/LeftTrack")
 left_track.GetPrim().GetReferences().AddReference("track.usda")
-UsdGeom.XformCommonAPI(left_track).SetTranslate(Gf.Vec3d(0.0, 0.0, -1.5))
+left_track_api = UsdGeom.XformCommonAPI(left_track)
+left_track_api.SetTranslate(Gf.Vec3d(-track_lateral_offset, 0.0, 0.0))
+left_track_api.SetRotate(Gf.Vec3f(0.0, 90.0, 0.0))
 
 right_track = UsdGeom.Xform.Define(stage, "/Tank/Tracks/RightTrack")
 right_track.GetPrim().GetReferences().AddReference("track.usda")
-UsdGeom.XformCommonAPI(right_track).SetTranslate(Gf.Vec3d(0.0, 0.0, 1.5))
+right_track_api = UsdGeom.XformCommonAPI(right_track)
+right_track_api.SetTranslate(Gf.Vec3d(track_lateral_offset, 0.0, 0.0))
+right_track_api.SetRotate(Gf.Vec3f(0.0, 90.0, 0.0))
 
 # 5. Reference Turret and Position on Chassis Top
 turret_xform = UsdGeom.Xform.Define(stage, "/Tank/Turret")

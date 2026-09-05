@@ -1,4 +1,8 @@
+import math
+
 from pxr import Gf, Usd, UsdGeom
+
+import track
 
 # 1. Initialize Animation Stage
 stage = Usd.Stage.CreateNew("out/tank_motion.usda")
@@ -34,6 +38,28 @@ for op in turret_xformable.GetOrderedXformOps():
         yaw_op = op
         break
 
+# Rolling parts of each track: the road wheels, drive sprocket and idler
+# wheel all spin about their own local Z axis, plus the tread PointInstancer
+# itself, whose positions/orientations are re-evaluated per frame by shifting
+# every link along the same stadium loop built in track.py.
+wheel_names = [f"Wheel_{i}" for i in range(track.NUM_ROAD_WHEELS)] + ["DriveSprocket", "IdlerWheel"]
+wheel_radii = {f"Wheel_{i}": track.ROAD_WHEEL_RADIUS for i in range(track.NUM_ROAD_WHEELS)}
+wheel_radii["DriveSprocket"] = track.PULLEY_RADIUS
+wheel_radii["IdlerWheel"] = track.PULLEY_RADIUS
+
+track_apis = []
+for track_name in ("LeftTrack", "RightTrack"):
+    wheel_apis = []
+    for wheel_name in wheel_names:
+        wheel_prim = stage.GetPrimAtPath(
+            f"/World/TankShot/RiggedTank/{track_name}/RoadWheels/{wheel_name}"
+        )
+        wheel_apis.append((UsdGeom.XformCommonAPI(wheel_prim), wheel_radii[wheel_name]))
+    instancer = UsdGeom.PointInstancer(
+        stage.GetPrimAtPath(f"/World/TankShot/RiggedTank/{track_name}/Instancer")
+    )
+    track_apis.append((wheel_apis, instancer))
+
 # 5. Author Time Samples across 100 Frames
 for frame in range(1, 101):
     time_code = Usd.TimeCode(frame)
@@ -47,6 +73,17 @@ for frame in range(1, 101):
     turret_yaw = t * 90.0
     if yaw_op:
         yaw_op.Set(turret_yaw, time_code)
+
+    # Roll the tracks: wheels/sprocket/idler spin at (distance / radius)
+    # radians, and the tread links re-trace the loop shifted by the same
+    # distance, so the belt appears to roll without slipping under the hull.
+    positions, orientations = track.compute_tread_transforms(phase=z_pos)
+    for wheel_apis, instancer in track_apis:
+        for wheel_api, radius in wheel_apis:
+            spin_deg = math.degrees(z_pos / radius)
+            wheel_api.SetRotate(Gf.Vec3f(0.0, 0.0, spin_deg), time=time_code)
+        instancer.GetPositionsAttr().Set(positions, time_code)
+        instancer.GetOrientationsAttr().Set(orientations, time_code)
 
 # 6. Save Stage
 stage.GetRootLayer().Save()
