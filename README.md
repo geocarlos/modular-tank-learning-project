@@ -5,7 +5,7 @@ following the 6-stage compositional pipeline described in `CLAUDE.md`:
 tread link -> track (point instancing) -> chassis -> turret (variants) ->
 tank assembly -> rigging -> motion.
 
-<video src="demos/modular_tank_anim.mp4" controls></video>
+![Tank demo](demos/modular_tank_anim.gif)
 
 ## Prerequisites
 
