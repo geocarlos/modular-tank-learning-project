@@ -9,9 +9,9 @@ stage = Usd.Stage.CreateNew("out/tank_motion.usda")
 UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y)
 UsdGeom.SetStageMetersPerUnit(stage, 1.0)
 
-# 2. Configure Time/Frame Rate Metadata (Frames 1 to 100 at 24fps)
+# 2. Configure Time/Frame Rate Metadata (Frames 1 to 265 at 24fps)
 stage.SetStartTimeCode(1.0)
-stage.SetEndTimeCode(100.0)
+stage.SetEndTimeCode(265.0)
 stage.SetFramesPerSecond(24.0)
 stage.SetTimeCodesPerSecond(24.0)
 
@@ -60,13 +60,14 @@ for track_name in ("LeftTrack", "RightTrack"):
     )
     track_apis.append((wheel_apis, instancer))
 
-# 5. Author Time Samples across 100 Frames
-for frame in range(1, 101):
+# 5. Author Time Samples across 265 Frames
+for frame in range(1, 266):
     time_code = Usd.TimeCode(frame)
-    t = (frame - 1) / 99.0  # Normalized progress [0.0 to 1.0]
+    t = (frame - 1) / 264.0  # Normalized progress [0.0 to 1.0]
 
-    # Drive vehicle forward 15 meters along Z
-    z_pos = t * 15.0
+    # Drive vehicle from 15 meters behind origin to 25 meters past it
+    # (starts/ends off camera, same speed as before over a longer path)
+    z_pos = -15.0 + t * 40.0
     root_trans_op.Set(Gf.Vec3d(0.0, 0.0, z_pos), time_code)
 
     # Sweep turret from 0 degrees to 90 degrees
