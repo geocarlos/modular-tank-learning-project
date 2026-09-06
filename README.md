@@ -9,23 +9,51 @@ tank assembly -> rigging -> motion.
 
 ## Prerequisites
 
-The system `python` on this machine does not have `pxr` installed (or has a
-mismatched build). Use the bundled USD-Python distribution instead:
+This project uses **one conda environment for everything** -- both running
+the generator scripts and validating the output -- plus [uv](https://docs.astral.sh/uv/)
+wired to that same environment for fast, lockfile-driven invocation.
+
+Why conda and not plain `uv sync` / PyPI: the PyPI `usd-core` wheel (what a
+plain `pyproject.toml` dependency would pull in) is a stripped "core" build --
+it has no `usdchecker` CLI and no Hydra. conda-forge's `openusd` package is
+the full build: it includes `usdchecker` (needed for step 3) and, as a bonus,
+`usdview` and Hydra, and it's published for Windows, macOS (Intel/ARM), and
+Linux (x86_64/ARM), so this isn't Windows- or machine-specific.
+
+**One-time setup** (requires [conda or mamba](https://github.com/conda-forge/miniforge)):
 
 ```powershell
-$env:USD_INSTALL_DIR = "C:\Users\geocarlos\workspace\usd_root"
-$env:PATH = "$env:USD_INSTALL_DIR\lib;$env:USD_INSTALL_DIR\plugin\usd;$env:USD_INSTALL_DIR\bin;$env:USD_INSTALL_DIR\python;$env:PATH"
-$env:PYTHONPATH = "$env:USD_INSTALL_DIR\lib\python;$env:PYTHONPATH"
+conda env create -f environment.yml -p ./.conda-env
 ```
 
-Run this once per shell session before any command below. All commands use
-`& "$env:USD_INSTALL_DIR\python\python.exe"` rather than plain `python` so
-they resolve to that same matching build.
+This creates a project-local `.conda-env/` (gitignored) rather than a
+globally-named environment, so the path below is the same on every machine
+regardless of where conda itself is installed.
+
+Then, once per shell session, point `uv` at that same environment instead of
+letting it create its own separate `.venv`:
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT = ".conda-env"
+```
+
+(macOS/Linux: `export UV_PROJECT_ENVIRONMENT=.conda-env`.) With that set,
+`uv run` below transparently uses `.conda-env`'s Python (and its
+conda-installed `pxr`) instead of managing its own venv.
+
+> **Don't run a bare `uv sync` or `uv add` against this environment.**
+> `pyproject.toml` intentionally declares no dependencies -- `openusd` (conda)
+> already provides everything steps 1-2 need. `uv sync`'s default is an
+> *exact* sync, which removes any package not declared in `pyproject.toml`;
+> pointed at `.conda-env`, that would strip out `usdview`'s own
+> conda-installed dependencies (PySide6, PyOpenGL). Plain `uv run` (used
+> below) is safe -- it only installs what's missing, it doesn't prune. If you
+> ever add a real uv dependency, sync with `uv sync --inexact`.
 
 ## 1. Generate the per-stage `.usda` files
 
 ```powershell
-& "$env:USD_INSTALL_DIR\python\python.exe" main.py
+uv run python main.py
 ```
 
 Runs the six generator scripts in order and (re)writes every `out/*.usda`
@@ -45,7 +73,7 @@ the `usd-dcc-export` Claude skill for the full write-up). Compile a
 self-contained, DCC-safe file with:
 
 ```powershell
-& "$env:USD_INSTALL_DIR\python\python.exe" src\export_for_dcc.py
+uv run python src/export_for_dcc.py
 ```
 
 This bakes both tread-link `PointInstancer`s into explicit, individually
@@ -56,11 +84,18 @@ any of the per-stage `.usda` files.
 ## 3. Validate (optional but recommended after any change)
 
 ```powershell
-cmd /c "$env:USD_INSTALL_DIR\scripts\usdchecker.bat" out\tank_final.usdc
+conda run -p ./.conda-env usdchecker out/tank_final.usdc
 ```
 
 Should print `Success!`. This only confirms the file is spec-valid USD, not
 that every consumer will render it identically -- see step 4's caveats.
+
+As a bonus, `.conda-env` also has `usdview` (Hydra-based), so you can inspect
+the result directly instead of only Blender/online viewers:
+
+```powershell
+conda run -p ./.conda-env usdview out/tank_final.usdc
+```
 
 ## 4. Import into Blender or an online viewer
 
