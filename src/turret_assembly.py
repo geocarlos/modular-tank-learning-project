@@ -1,6 +1,6 @@
 import math
 
-from pxr import Gf, Usd, UsdGeom, Vt
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade, Vt
 
 # 1. Initialize Stage
 stage = Usd.Stage.CreateNew("out/turret.usda")
@@ -65,52 +65,101 @@ def compute_flat_face_normals(points, face_vertex_counts, face_vertex_indices):
     return normals
 
 
-base_mesh = UsdGeom.Mesh.Define(stage, "/Turret/Base")
-base_mesh.CreatePointsAttr(points_array)
-base_mesh.CreateFaceVertexCountsAttr(Vt.IntArray(face_vertex_counts))
-base_mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(face_vertex_indices))
-base_mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)  # keep flat armor facets
-base_mesh.CreateDoubleSidedAttr(True)
-base_mesh.CreateExtentAttr(UsdGeom.PointBased.ComputeExtent(points_array))
-base_mesh.CreateNormalsAttr(
-    Vt.Vec3fArray(compute_flat_face_normals(points, face_vertex_counts, face_vertex_indices))
-)
-base_mesh.SetNormalsInterpolation(UsdGeom.Tokens.uniform)
+def _make_mesh(path, points, face_vertex_counts, face_vertex_indices):
+    points_array = Vt.Vec3fArray(points)
+    mesh = UsdGeom.Mesh.Define(stage, path)
+    mesh.CreatePointsAttr(points_array)
+    mesh.CreateFaceVertexCountsAttr(Vt.IntArray(face_vertex_counts))
+    mesh.CreateFaceVertexIndicesAttr(Vt.IntArray(face_vertex_indices))
+    mesh.CreateSubdivisionSchemeAttr(UsdGeom.Tokens.none)  # keep flat armor facets
+    mesh.CreateDoubleSidedAttr(True)  # tolerate any inconsistent hand-authored winding
+    mesh.CreateExtentAttr(UsdGeom.PointBased.ComputeExtent(points_array))
+    mesh.CreateNormalsAttr(
+        Vt.Vec3fArray(compute_flat_face_normals(points, face_vertex_counts, face_vertex_indices))
+    )
+    mesh.SetNormalsInterpolation(UsdGeom.Tokens.uniform)
+    return mesh
+
+
+def _make_cylinder_mesh(path, radius, height, axis, sides=16):
+    """An explicit tessellated cylinder Mesh, in place of UsdGeom.Cylinder --
+    some consumers (e.g. Blender's USD importer) don't apply bound materials
+    to implicit Gprim shapes like Cylinder, only to real Mesh prims. `sides`
+    trades roundness for vertex count; 16 reads as round at this asset's
+    scale while keeping flat-shaded facets consistent with the housing."""
+    half_h = height / 2.0
+    cyl_points = []
+    for ring_y in (-half_h, half_h):
+        for i in range(sides):
+            angle = 2.0 * math.pi * i / sides
+            cx = radius * math.cos(angle)
+            cz = radius * math.sin(angle)
+            if axis == "X":
+                cyl_points.append(Gf.Vec3f(ring_y, cx, cz))
+            elif axis == "Z":
+                cyl_points.append(Gf.Vec3f(cx, cz, ring_y))
+            else:  # "Y"
+                cyl_points.append(Gf.Vec3f(cx, ring_y, cz))
+    # cyl_points[0:sides] = bottom ring, cyl_points[sides:2*sides] = top ring
+    cyl_face_vertex_counts = [sides, sides] + [4] * sides
+    cyl_face_vertex_indices = list(reversed(range(sides))) + list(range(sides, 2 * sides))
+    for i in range(sides):
+        j = (i + 1) % sides
+        cyl_face_vertex_indices.extend([i, j, sides + j, sides + i])
+    return _make_mesh(path, cyl_points, cyl_face_vertex_counts, cyl_face_vertex_indices)
+
+
+base_mesh = _make_mesh("/Turret/Base", points, face_vertex_counts, face_vertex_indices)
 
 OLIVE_DRAB = (0.23, 0.27, 0.15)
 GUNMETAL = (0.15, 0.15, 0.16)
 DARK_METAL = (0.08, 0.08, 0.09)
-base_mesh.CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(*OLIVE_DRAB)]))
+
+_material_cache = {}
+
+
+def _get_material(stage, color):
+    """One UsdPreviewSurface material per unique color per stage, shared across
+    prims, so displayColor also renders in tools (e.g. Blender) that only shade
+    from bound materials and ignore the bare displayColor primvar."""
+    key = (id(stage), color)
+    if key not in _material_cache:
+        name = "Mat_{:02x}{:02x}{:02x}".format(*(round(c * 255) for c in color))
+        mat_path = f"/{stage.GetDefaultPrim().GetName()}/Materials/{name}"
+        material = UsdShade.Material.Define(stage, mat_path)
+        shader = UsdShade.Shader.Define(stage, f"{mat_path}/PreviewSurface")
+        shader.CreateIdAttr("UsdPreviewSurface")
+        shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
+        shader.CreateOutput("surface", Sdf.ValueTypeNames.Token)
+        material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+        _material_cache[key] = material
+    return _material_cache[key]
 
 
 def _set_color(prim, color):
     UsdGeom.Gprim(prim).CreateDisplayColorAttr(Vt.Vec3fArray([Gf.Vec3f(*color)]))
+    UsdShade.MaterialBindingAPI.Apply(prim).Bind(_get_material(prim.GetStage(), color))
+
+
+_set_color(base_mesh.GetPrim(), OLIVE_DRAB)
 
 
 # 3b. Common turret details (outside any variant, so both weapon loadouts get
 # them): commander's hatch, antenna mount, and smoke grenade launchers.
-commander_hatch = UsdGeom.Cylinder.Define(stage, "/Turret/CommanderHatch")
-commander_hatch.GetRadiusAttr().Set(0.18)
-commander_hatch.GetHeightAttr().Set(0.05)
-commander_hatch.GetAxisAttr().Set(UsdGeom.Tokens.y)
+commander_hatch = _make_cylinder_mesh("/Turret/CommanderHatch", radius=0.18, height=0.05, axis="Y")
 UsdGeom.XformCommonAPI(commander_hatch).SetTranslate(Gf.Vec3d(-0.25, housing_height + 0.02, -0.15))
 _set_color(commander_hatch.GetPrim(), OLIVE_DRAB)
 
-antenna = UsdGeom.Cylinder.Define(stage, "/Turret/Antenna")
-antenna.GetRadiusAttr().Set(0.015)
-antenna.GetHeightAttr().Set(0.9)
-antenna.GetAxisAttr().Set(UsdGeom.Tokens.y)
+antenna = _make_cylinder_mesh("/Turret/Antenna", radius=0.015, height=0.9, axis="Y")
 UsdGeom.XformCommonAPI(antenna).SetTranslate(Gf.Vec3d(0.35, housing_height + 0.45, -0.55))
 _set_color(antenna.GetPrim(), DARK_METAL)
 
 for side in (-1.0, 1.0):
     for row in range(3):
-        launcher = UsdGeom.Cylinder.Define(
-            stage, f"/Turret/SmokeLauncher_{'L' if side < 0 else 'R'}_{row}"
+        launcher = _make_cylinder_mesh(
+            f"/Turret/SmokeLauncher_{'L' if side < 0 else 'R'}_{row}",
+            radius=0.025, height=0.18, axis="Z",
         )
-        launcher.GetRadiusAttr().Set(0.025)
-        launcher.GetHeightAttr().Set(0.18)
-        launcher.GetAxisAttr().Set(UsdGeom.Tokens.z)
         UsdGeom.XformCommonAPI(launcher).SetTranslate(
             Gf.Vec3d(side * (0.45 + row * 0.07), housing_height * 0.55, bottom_radius * 0.85)
         )
@@ -128,24 +177,15 @@ def _build_barrel(root_path, xy_translate,
     barrel_xform = UsdGeom.Xform.Define(stage, root_path)
     UsdGeom.XformCommonAPI(barrel_xform).SetTranslate(xy_translate)
 
-    mantlet = UsdGeom.Cylinder.Define(stage, root_path + "/Mantlet")
-    mantlet.GetRadiusAttr().Set(mantlet_radius)
-    mantlet.GetHeightAttr().Set(mantlet_height)
-    mantlet.GetAxisAttr().Set(UsdGeom.Tokens.z)
+    mantlet = _make_cylinder_mesh(root_path + "/Mantlet", radius=mantlet_radius, height=mantlet_height, axis="Z")
     UsdGeom.XformCommonAPI(mantlet).SetTranslate(Gf.Vec3d(0.0, 0.0, mantlet_center))
     _set_color(mantlet.GetPrim(), OLIVE_DRAB)
 
-    tube = UsdGeom.Cylinder.Define(stage, root_path + "/Tube")
-    tube.GetRadiusAttr().Set(tube_radius)
-    tube.GetHeightAttr().Set(tube_height)
-    tube.GetAxisAttr().Set(UsdGeom.Tokens.z)
+    tube = _make_cylinder_mesh(root_path + "/Tube", radius=tube_radius, height=tube_height, axis="Z")
     UsdGeom.XformCommonAPI(tube).SetTranslate(Gf.Vec3d(0.0, 0.0, tube_center))
     _set_color(tube.GetPrim(), GUNMETAL)
 
-    muzzle_brake = UsdGeom.Cylinder.Define(stage, root_path + "/MuzzleBrake")
-    muzzle_brake.GetRadiusAttr().Set(brake_radius)
-    muzzle_brake.GetHeightAttr().Set(brake_height)
-    muzzle_brake.GetAxisAttr().Set(UsdGeom.Tokens.z)
+    muzzle_brake = _make_cylinder_mesh(root_path + "/MuzzleBrake", radius=brake_radius, height=brake_height, axis="Z")
     UsdGeom.XformCommonAPI(muzzle_brake).SetTranslate(Gf.Vec3d(0.0, 0.0, brake_center))
     _set_color(muzzle_brake.GetPrim(), DARK_METAL)
 
